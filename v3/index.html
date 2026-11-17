@@ -333,22 +333,43 @@
   let bricks = [], flashes = [], paddle = { x: 0, w: 4 }, ball = { x: 0, y: 0, vx: 0, vy: 0, on: false }, speed = 11, regrow = 0, visible = false, raf = 0, last = 0;
   const rnd = (a, b) => a + Math.random() * (b - a);
 
+  // the deconstructed ic-it logo (grey shapes on orange), in the units of the brand picture (433 × 395): the dot,
+  // a ring piece on the left (cut radially at 32°) and an arch on the right — both rings r ≈ 125…235
+  const inLogo = (x, y) => {
+    if (Math.hypot(x - 178, y - 52) <= 54) return true;
+    let dx = x, dy = y - 50, d = Math.hypot(dx, dy), a = Math.atan2(dy, dx);
+    if (d >= 125 && d <= 235 && a >= 0.56 && a <= 2.55) return true;  // 32° … 146° (y down), both ends cut radially
+    dx = x - 434; dy = y - 292; d = Math.hypot(dx, dy);
+    return d >= 126 && d <= 234 && dy <= 0;                           // upper half: the arch
+  };
+  const TOP = BRICK_ROWS;                                             // the logo window starts under the full rows
   function build() {
-    // a ragged wall filling most of the height: per column a depth from a random walk (steps of −2…+2, now and then a
-    // bigger jump), a few loose holes inside; the bottom rows stay free for the ball and the paddle
-    const maxD = rows - (innerWidth < 900 ? 7 : 5), minD = BRICK_ROWS + 1;
-    const depth = [], target = minD + (maxD - minD) * 0.68; let d = Math.round(rnd(target - 2, maxD));
-    for (let c = 0; c < cols; c++) {
-      // pulled towards ~2/3 of the height, so the wall hangs deep but stays ragged
-      d += Math.round((target - d) * 0.25) + (Math.random() < 0.18 ? Math.round(rnd(-4, 4)) : [-2, -1, -1, 0, 0, 1, 1, 2][(Math.random() * 8) | 0]);
-      d = Math.max(minD, Math.min(maxD, d)); depth.push(d);
+    const mobile = innerWidth < 900, L = mobile ? 13 : 10, maxD = TOP + L;   // logo rows; below them the field stays free
+    bricks = []; for (let r = 0; r < maxD; r++) bricks.push(new Array(cols).fill(false));
+    // 1) the logo, rasterised on the pixel grid (a cell is a brick when ≥ 7/16 of it is covered); the window starts
+    //    ~1 row above the dot, so the clumps have room around the upper shapes
+    const s = 350 / L, x0 = 216 - cols * s / 2, y0 = -50;
+    for (let r = 0; r < L; r++) for (let c = 0; c < cols; c++) {
+      let n = 0;
+      for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) n += inLogo(x0 + (c + (i + 0.5) / 4) * s, y0 + (r + (j + 0.5) / 4) * s);
+      bricks[TOP + r][c] = n >= 7;
     }
-    bricks = [];
-    for (let r = 0; r < maxD; r++) {
-      const row = new Array(cols).fill(false);
-      for (let c = 0; c < cols; c++) row[c] = r < BRICK_ROWS || (r < depth[c] && !(r > BRICK_ROWS && r < depth[c] - 1 && Math.random() < 0.06));
-      bricks.push(row);
+    // 2) above it, hanging from the footer: two full rows, a ragged edge and randomly stuck-on clumps of pixels
+    const band = []; for (let r = 0; r < maxD; r++) band.push(new Array(cols).fill(false));
+    for (let c = 0; c < cols; c++) for (let r = 0; r < BRICK_ROWS + (Math.random() < 0.3 ? 1 : 0); r++) band[r][c] = true;
+    const clumps = Math.round(cols / (mobile ? 3 : 3.5));
+    for (let k = 0; k < clumps; k++) {                                // a short random walk = a clump of 2–5 stuck pixels
+      let c = (Math.random() * cols) | 0, r = BRICK_ROWS + ((Math.random() * 2) | 0);
+      for (let n = 2 + ((Math.random() * 4) | 0); n > 0; n--) {
+        if (r >= 1 && r < BRICK_ROWS + 3 && c >= 0 && c < cols) band[r][c] = true;
+        if (Math.random() < 0.55) c += Math.random() < 0.5 ? -1 : 1; else r += Math.random() < 0.6 ? 1 : -1;
+      }
     }
+    // the clumps never touch the logo (not even diagonally), so its shapes stay readable
+    const nearLogo = (r, c) => { for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) { const rr = r + i, cc = c + j; if (rr >= TOP && rr < maxD && cc >= 0 && cc < cols && bricks[rr][cc]) return true; } return false; };
+    for (let r = BRICK_ROWS; r < maxD; r++) for (let c = 0; c < cols; c++) if (band[r][c] && nearLogo(r, c)) band[r][c] = false;
+    for (let r = 0; r < maxD; r++) for (let c = 0; c < cols; c++) bricks[r][c] = bricks[r][c] || band[r][c];
+    const depth = []; for (let c = 0; c < cols; c++) { let d = 0; while (d < maxD && band[d][c]) d++; depth.push(d); }
     // one or two broken, wandering shafts climb through the wall (now and then a brick left in place, now and then a
     // step aside) and go on as a short pixel staircase (diagonal single cells) into the footer — never above the bottom
     // of the footer's link columns. Orange peeks out under the footer and invites to scroll on.
@@ -370,7 +391,9 @@
     for (let k = 0; k < nShafts; k++) {
       let best = null;
       for (let t = 0; t < 40; t++) {
-        const c = 1 + ((Math.random() * (cols - 3)) | 0), dir = Math.random() < 0.5 ? -1 : 1, path = shaftPath(c);
+        const c = 1 + ((Math.random() * (cols - 3)) | 0), dir = Math.random() < 0.5 ? -1 : 1;
+        if (depth[c] < maxD && bricks[depth[c]][c]) continue;          // the shaft must open onto the orange field, not the logo
+        const path = shaftPath(c);
         const want = 2 + (Math.random() < 0.5 ? 1 : 0), steps = [];   // up to 2–3 steps
         for (let i = 1; i <= Math.min(want, ceil); i++) { const cc = path.top + dir * i, rr = -i; if (cc < 0 || cc >= cols || !freeCell(cc, rr)) break; steps.push([cc, rr]); }
         const span = [...path.cells.map(q => q[0]), ...steps.map(q => q[0])];
@@ -389,7 +412,7 @@
     const mobile = innerWidth < 900, u = mobile ? Math.min(innerWidth, 520) / 390 : innerWidth / 1440;
     cell = (mobile ? 22 : 60) * u;
     W = sec.clientWidth; cols = Math.max(10, Math.round(W / cell)); cell = W / cols;
-    rows = mobile ? 18 : 14;
+    rows = mobile ? 22 : 17;
     const foot = sec.previousElementSibling;                         // the footer
     topPx = foot.offsetHeight; ceil = Math.ceil(topPx / cell);
     sec.style.marginTop = -topPx + 'px';
@@ -460,7 +483,8 @@
     ctx.fillStyle = ORANGE; holes.forEach(h => { const [c, r] = h.split(',').map(Number); ctx.fillRect(X(c), Y(r), X(c + 1) - X(c), Y(r + 1) - Y(r)); });   // …with the staircase holes
     const rect = (c, r, w, h, col, a = 1) => { ctx.globalAlpha = a; ctx.fillStyle = col; ctx.fillRect(X(c), Y(r), X(c + w) - X(c), Y(r + h) - Y(r)); };
     const grow = regrow > 0 && regrow <= 1 ? 1 - regrow : 1;
-    bricks.forEach((row, r) => row.forEach((v, c) => { if (v) rect(c, r, 1, 1, C.brick, r < BRICK_ROWS ? 1 : Math.max(0, Math.min(1, grow * 2.2 - (r - BRICK_ROWS) * 0.12))); }));
+    const span = 1 + (bricks.length - BRICK_ROWS) * 0.12;            // fade in row by row, top first
+    bricks.forEach((row, r) => row.forEach((v, c) => { if (v) rect(c, r, 1, 1, C.brick, r < BRICK_ROWS ? 1 : Math.max(0, Math.min(1, grow * span - (r - BRICK_ROWS) * 0.12))); }));
     flashes.forEach(f => rect(f.c, f.r, 1, 1, f.t < 0.12 ? C.ball : C.hit, 1 - f.t / 0.35));
     ctx.globalAlpha = 1;
     rect(paddle.x, rows - 1, paddle.w, 1, C.paddle);
