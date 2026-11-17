@@ -182,7 +182,10 @@
   /* ============ arcade under the footer (brick breaker on the 60 px pixel grid) ============ */
   /* full width, right under the footer: the playing field is orange, the bricks are footer-coloured cells (so the footer
      seems to end in a stepped pixel edge), ball and paddle are blue */
-  .arcade { position: relative; z-index: 1; background: linear-gradient(#E3E4DF 0 1px, var(--orange) 1px); margin-top: -1px; }   /* no seam under the footer; shafts reach the top row */
+  .arcade { position: relative; z-index: 1; background: var(--orange); }
+  /* the game canvas reaches up behind the footer (negative margin set in JS) and paints the footer's grey itself, so its
+     holes can climb up between the footer's texts; the footer goes on top, transparent */
+  body:has(.arcade) footer { z-index: 3; background: transparent; }
   .arcade canvas { display: block; width: 100%; touch-action: none; outline: none; }
   .arcade-hint { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); margin: 0; pointer-events: none;
                  font: 400 calc(14 * var(--u)) / 1.35 var(--mono); color: rgba(255,255,255,.85); white-space: nowrap; transition: opacity .3s ease; }
@@ -322,9 +325,11 @@
 (() => {
   const sec = document.getElementById('arcade'), cv = document.getElementById('arcadeCanvas'), hint = document.getElementById('arcadeHint');
   const ctx = cv.getContext('2d');
+  const ORANGE = getComputedStyle(document.documentElement).getPropertyValue('--orange').trim() || '#FF6D19';
   const C = { brick: '#E3E4DF', ball: '#0045E6', paddle: '#0045E6', hit: '#7F5780' };   // orange field; hit flash = blue → 50 % blue/orange
   const BRICK_ROWS = 2;                                               // full brick rows; below them every column hangs down to a random depth
   let cols = 24, rows = 14, cell = 60, dpr = 1, W = 0, H = 0;
+  let topPx = 0, ceil = 0, holes = new Set(), textBoxes = [];   // the part behind the footer: its height, rows, holes, text boxes
   let bricks = [], flashes = [], paddle = { x: 0, w: 4 }, ball = { x: 0, y: 0, vx: 0, vy: 0, on: false }, speed = 11, regrow = 0, visible = false, raf = 0, last = 0;
   const rnd = (a, b) => a + Math.random() * (b - a);
 
@@ -344,38 +349,60 @@
       for (let c = 0; c < cols; c++) row[c] = r < BRICK_ROWS || (r < depth[c] && !(r > BRICK_ROWS && r < depth[c] - 1 && Math.random() < 0.06));
       bricks.push(row);
     }
-    // a few shafts break through the full rows right up to the footer's content — orange peeks out under the footer and
-    // invites to scroll on. Each shaft: 1 cell wide, 2 wide at its foot, its top cell sometimes jogs one column aside.
-    const nShafts = innerWidth < 900 ? 2 : Math.max(3, Math.round(cols / 6)), used = new Set();
-    for (let k = 0, tries = 0; k < nShafts && tries < 60; tries++) {
-      const c = 1 + ((Math.random() * (cols - 3)) | 0);
-      if ([-2, -1, 0, 1, 2].some(o => used.has(c + o))) continue;    // keep shafts apart
-      used.add(c); k++;
-      const top = Math.random() < 0.6 ? 0 : 1, foot = depth[c];
-      for (let r = top; r < foot; r++) bricks[r][c] = false;
-      const side = Math.random() < 0.5 ? -1 : 1;
-      for (let r = Math.max(top + 2, foot - (Math.random() < 0.5 ? 1 : 2)); r < Math.min(foot, depth[c + side]); r++) bricks[r][c + side] = false;
-      if (top === 0 && Math.random() < 0.5) { bricks[0][c] = true; bricks[0][c - side] = false; bricks[1][c - side] = bricks[1][c - side] && Math.random() < 0.5; }
+    // one or two shafts break through the wall and climb on as a pixel staircase (diagonal single cells) up into the
+    // footer, between its texts — orange peeks out under the footer and invites to scroll on
+    holes = new Set();
+    const nShafts = innerWidth < 900 ? 1 : 2, used = new Set();
+    for (let k = 0; k < nShafts; k++) {
+      let best = null;
+      for (let t = 0; t < 40; t++) {
+        const c = 1 + ((Math.random() * (cols - 3)) | 0), dir = Math.random() < 0.5 ? -1 : 1;
+        const want = 2 + (Math.random() < 0.5 ? 1 : 0), steps = [];   // 2–3 steps up
+        for (let i = 1; i <= Math.min(want, ceil); i++) { const cc = c + dir * i, rr = -i; if (cc < 0 || cc >= cols || !freeCell(cc, rr)) break; steps.push([cc, rr]); }
+        const span = [c, ...steps.map(st => st[0])];
+        if (span.some(x => [...used].some(u => Math.abs(u - x) < 5))) continue;   // shafts and staircases stay well apart
+        if (!best || steps.length > best.steps.length) best = { c, dir, steps };
+      }
+      if (!best) break;
+      const { c, dir, steps } = best; used.add(c); steps.forEach(([cc]) => used.add(cc));
+      for (let r = 0; r < depth[c]; r++) bricks[r][c] = false;
+      for (let r = Math.max(2, depth[c] - (Math.random() < 0.5 ? 1 : 2)); r < Math.min(depth[c], depth[c - dir] ?? 0); r++) bricks[r][c - dir] = false;   // wider foot
+      steps.forEach(([cc, rr]) => holes.add(cc + ',' + rr));
     }
-    hint.style.top = ((maxD + rows - 1) / 2 * cell) + 'px';         // the hint sits in the free orange band above the paddle
+    hint.style.top = (topPx + (maxD + rows - 1) / 2 * cell) + 'px';         // the hint sits in the free orange band above the paddle
     regrow = 1;                                                       // fade the wall in
   }
   function layout() {
     const mobile = innerWidth < 900, u = mobile ? Math.min(innerWidth, 520) / 390 : innerWidth / 1440;
     cell = (mobile ? 22 : 60) * u;
     W = sec.clientWidth; cols = Math.max(10, Math.round(W / cell)); cell = W / cols;
-    rows = mobile ? 18 : 14; H = Math.round(rows * cell);
+    rows = mobile ? 18 : 14;
+    const foot = sec.previousElementSibling;                         // the footer
+    topPx = foot.offsetHeight; ceil = Math.ceil(topPx / cell);
+    sec.style.marginTop = -topPx + 'px';
+    H = Math.round(topPx + rows * cell);
     dpr = Math.min(devicePixelRatio || 1, 2);
     cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); cv.style.height = H + 'px';
+    // where the footer has text (exact text runs, images, the dropdown) — the staircase cells keep clear of it
+    const fr = foot.getBoundingClientRect(), pad = 10; textBoxes = [];
+    const add = r => { if (r.width && r.height) textBoxes.push([r.left - fr.left - pad, r.top - fr.top - pad, r.right - fr.left + pad, r.bottom - fr.top + pad]); };
+    const tw = document.createTreeWalker(foot, NodeFilter.SHOW_TEXT); const rg = document.createRange();
+    while (tw.nextNode()) if (tw.currentNode.nodeValue.trim()) { rg.selectNodeContents(tw.currentNode); [...rg.getClientRects()].forEach(add); }
+    foot.querySelectorAll('img, .lang-btn').forEach(e => add(e.getBoundingClientRect()));
     paddle.w = mobile ? 4 : 5;
     paddle.x = Math.min(paddle.x || (cols - paddle.w) / 2, cols - paddle.w);
-    build(); park();
+    build(); park(); draw();
   }
   function park() { ball.on = false; ball.x = paddle.x + paddle.w / 2 - 0.5; ball.y = rows - 2; hint.hidden = false; }
   function launch() {
     if (ball.on) return;
     const a = rnd(-0.5, 0.5);
     ball.vx = Math.sin(a) * speed; ball.vy = -Math.cos(a) * speed; ball.on = true; hint.hidden = true;
+  }
+  function freeCell(c, r) {   // a cell behind the footer (r < 0) that touches no footer text
+    const x0 = c * cell, y0 = topPx + r * cell, x1 = x0 + cell, y1 = y0 + cell;
+    if (y0 < 0) return false;
+    return !textBoxes.some(([a, b, c2, d]) => x0 < c2 && x1 > a && y0 < d && y1 > b);
   }
   const brickAt = (c, r) => r >= 0 && r < bricks.length && c >= 0 && c < cols && bricks[r][c];
   function hitBrick(c, r) { bricks[r][c] = false; flashes.push({ c, r, t: 0 }); speed = Math.min(16, speed + 0.06); }
@@ -409,8 +436,10 @@
   }
   function draw() {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, cv.width, cv.height);                       // the section background is the blue field
-    const k = cell * dpr, X = c => Math.round(c * k), Y = r => Math.round(r * k);
+    const k = cell * dpr, X = c => Math.round(c * k), Y = r => Math.round((topPx + r * cell) * dpr);
+    ctx.globalAlpha = 1; ctx.fillStyle = ORANGE; ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.fillStyle = C.brick; ctx.fillRect(0, 0, cv.width, Y(0));    // behind the footer: footer grey…
+    ctx.fillStyle = ORANGE; holes.forEach(h => { const [c, r] = h.split(',').map(Number); ctx.fillRect(X(c), Y(r), X(c + 1) - X(c), Y(r + 1) - Y(r)); });   // …with the staircase holes
     const rect = (c, r, w, h, col, a = 1) => { ctx.globalAlpha = a; ctx.fillStyle = col; ctx.fillRect(X(c), Y(r), X(c + w) - X(c), Y(r + h) - Y(r)); };
     const grow = regrow > 0 && regrow <= 1 ? 1 - regrow : 1;
     bricks.forEach((row, r) => row.forEach((v, c) => { if (v) rect(c, r, 1, 1, C.brick, r < BRICK_ROWS ? 1 : Math.max(0, Math.min(1, grow * 2.2 - (r - BRICK_ROWS) * 0.12))); }));
@@ -444,7 +473,9 @@
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); movePaddle(paddle.x + paddle.w / 2 + (e.key === 'ArrowLeft' ? -1.5 : 1.5)); }
     if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); launch(); }
   });
-  let rt = 0; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(layout, 150); });
+  let rt = 0; const relayout = () => { clearTimeout(rt); rt = setTimeout(layout, 150); };
+  addEventListener('resize', relayout); addEventListener('ic-lang', relayout);   // texts move → new staircase
+  document.fonts && document.fonts.ready.then(relayout);
   layout();
 })();
 </script>
