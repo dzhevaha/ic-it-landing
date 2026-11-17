@@ -329,7 +329,7 @@
   const C = { brick: '#E3E4DF', ball: '#0045E6', paddle: '#0045E6', hit: '#7F5780' };   // orange field; hit flash = blue → 50 % blue/orange
   const BRICK_ROWS = 2;                                               // full brick rows; below them every column hangs down to a random depth
   let cols = 24, rows = 14, cell = 60, dpr = 1, W = 0, H = 0;
-  let topPx = 0, ceil = 0, holes = new Set(), textBoxes = [];   // the part behind the footer: its height, rows, holes, text boxes
+  let holeTop = 0, topPx = 0, ceil = 0, holes = new Set(), textBoxes = [];   // the part behind the footer: its height, rows, holes, text boxes
   let bricks = [], flashes = [], paddle = { x: 0, w: 4 }, ball = { x: 0, y: 0, vx: 0, vy: 0, on: false }, speed = 11, regrow = 0, visible = false, raf = 0, last = 0;
   const rnd = (a, b) => a + Math.random() * (b - a);
 
@@ -349,25 +349,38 @@
       for (let c = 0; c < cols; c++) row[c] = r < BRICK_ROWS || (r < depth[c] && !(r > BRICK_ROWS && r < depth[c] - 1 && Math.random() < 0.06));
       bricks.push(row);
     }
-    // one or two shafts break through the wall and climb on as a pixel staircase (diagonal single cells) up into the
-    // footer, between its texts — orange peeks out under the footer and invites to scroll on
+    // one or two broken, wandering shafts climb through the wall (now and then a brick left in place, now and then a
+    // step aside) and go on as a short pixel staircase (diagonal single cells) into the footer — never above the bottom
+    // of the footer's link columns. Orange peeks out under the footer and invites to scroll on.
     holes = new Set();
+    const shaftPath = c => {   // bottom → top; returns the carved cells and the column it ends in
+      const cells = []; let x = c, run = 0; const d = depth[c];
+      for (let r = d - 1; r >= 0; r--) {
+        const mid = r > 0 && r < d - 1, force = mid && run >= 2;   // never more than 2 cells straight up
+        if (mid && (force || Math.random() < 0.35)) {
+          if (Math.random() < 0.6) { const nx = x + (Math.random() < 0.5 ? -1 : 1); if (nx >= 0 && nx < cols) { cells.push([nx, r]); x = nx; } }
+          else { run = 0; continue; }                                // a brick left in place
+          run = 0;
+        }
+        cells.push([x, r]); run++;
+      }
+      return { cells, top: x };
+    };
     const nShafts = innerWidth < 900 ? 1 : 2, used = new Set();
     for (let k = 0; k < nShafts; k++) {
       let best = null;
       for (let t = 0; t < 40; t++) {
-        const c = 1 + ((Math.random() * (cols - 3)) | 0), dir = Math.random() < 0.5 ? -1 : 1;
-        const want = 2 + (Math.random() < 0.5 ? 1 : 0), steps = [];   // 2–3 steps up
-        for (let i = 1; i <= Math.min(want, ceil); i++) { const cc = c + dir * i, rr = -i; if (cc < 0 || cc >= cols || !freeCell(cc, rr)) break; steps.push([cc, rr]); }
-        const span = [c, ...steps.map(st => st[0])];
+        const c = 1 + ((Math.random() * (cols - 3)) | 0), dir = Math.random() < 0.5 ? -1 : 1, path = shaftPath(c);
+        const want = 2 + (Math.random() < 0.5 ? 1 : 0), steps = [];   // up to 2–3 steps
+        for (let i = 1; i <= Math.min(want, ceil); i++) { const cc = path.top + dir * i, rr = -i; if (cc < 0 || cc >= cols || !freeCell(cc, rr)) break; steps.push([cc, rr]); }
+        const span = [...path.cells.map(q => q[0]), ...steps.map(q => q[0])];
         if (span.some(x => [...used].some(u => Math.abs(u - x) < 5))) continue;   // shafts and staircases stay well apart
-        if (!best || steps.length > best.steps.length) best = { c, dir, steps };
+        if (!best || steps.length > best.steps.length) best = { path, steps, span };
       }
       if (!best) break;
-      const { c, dir, steps } = best; used.add(c); steps.forEach(([cc]) => used.add(cc));
-      for (let r = 0; r < depth[c]; r++) bricks[r][c] = false;
-      for (let r = Math.max(2, depth[c] - (Math.random() < 0.5 ? 1 : 2)); r < Math.min(depth[c], depth[c - dir] ?? 0); r++) bricks[r][c - dir] = false;   // wider foot
-      steps.forEach(([cc, rr]) => holes.add(cc + ',' + rr));
+      best.span.forEach(x => used.add(x));
+      best.path.cells.forEach(([x, r]) => { bricks[r][x] = false; });
+      best.steps.forEach(([cc, rr]) => holes.add(cc + ',' + rr));
     }
     hint.style.top = (topPx + (maxD + rows - 1) / 2 * cell) + 'px';         // the hint sits in the free orange band above the paddle
     regrow = 1;                                                       // fade the wall in
@@ -389,6 +402,11 @@
     const tw = document.createTreeWalker(foot, NodeFilter.SHOW_TEXT); const rg = document.createRange();
     while (tw.nextNode()) if (tw.currentNode.nodeValue.trim()) { rg.selectNodeContents(tw.currentNode); [...rg.getClientRects()].forEach(add); }
     foot.querySelectorAll('img, .lang-btn').forEach(e => add(e.getBoundingClientRect()));
+    // holes go no higher than the bottom of the link / contact columns (a few px of slack for rounding)
+    holeTop = 0; foot.querySelectorAll('.f-col').forEach(col => {   // the column boxes stretch, so measure their text
+      const w = document.createTreeWalker(col, NodeFilter.SHOW_TEXT);
+      while (w.nextNode()) if (w.currentNode.nodeValue.trim()) { rg.selectNodeContents(w.currentNode); [...rg.getClientRects()].forEach(r => { holeTop = Math.max(holeTop, r.bottom - fr.top - 6); }); }
+    });
     paddle.w = mobile ? 4 : 5;
     paddle.x = Math.min(paddle.x || (cols - paddle.w) / 2, cols - paddle.w);
     build(); park(); draw();
@@ -401,7 +419,7 @@
   }
   function freeCell(c, r) {   // a cell behind the footer (r < 0) that touches no footer text
     const x0 = c * cell, y0 = topPx + r * cell, x1 = x0 + cell, y1 = y0 + cell;
-    if (y0 < 0) return false;
+    if (y0 < holeTop) return false;
     return !textBoxes.some(([a, b, c2, d]) => x0 < c2 && x1 > a && y0 < d && y1 > b);
   }
   const brickAt = (c, r) => r >= 0 && r < bricks.length && c >= 0 && c < cols && bricks[r][c];
