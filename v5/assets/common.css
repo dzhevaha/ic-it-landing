@@ -1,7 +1,9 @@
 /* ic-it — shared by every page: tokens, base, footer, language dropdown, legal pages */
 
 /* ============ tokens (from the Figma file) ============ */
+/* light-only design: browsers must not auto-darken it (with the <meta name="color-scheme"> in every page) */
 :root {
+  color-scheme: only light;
   --bg: #F4F5F0; --blue: #0045E6; --orange: #FF6D19; --ink: #000;
   --line: rgba(0,0,0,.25);
   --u: calc(100vw / 1440);               /* 1 design px; the whole page scales with the width */

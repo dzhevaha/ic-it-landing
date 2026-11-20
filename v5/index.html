@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="only light">
 <!-- the phone layout: phones AND portrait tablets (iPad upright is phone-like, not a short desktop) — one query for CSS and JS -->
 <script>window.IC_PHONE = '(max-width: 899px), (max-width: 1199px) and (orientation: portrait)'; window.icPhone = () => matchMedia(window.IC_PHONE).matches;</script>
 <title>ic-it — IT. Simply. Works.</title>
@@ -85,7 +86,7 @@
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 </style>
-<link rel="stylesheet" href="assets/common.css?v=94298947">
+<link rel="stylesheet" href="assets/common.css?v=e2363422">
 <style>
   /* tokens, base, footer and the language dropdown live in assets/common.css (shared with the legal pages) */
   /* everything sits above the fixed WebGL layer (pixels + cubes) */
@@ -124,9 +125,12 @@
   .tag-word.on { opacity: 1; transform: none; transition-delay: .45s; }
 
   /* client logos — endless marquee */
-  .logos { position: absolute; left: 0; right: 0; top: calc(900 * var(--hu) + 27 * var(--u)); height: calc(66 * var(--u));   /* 3 units of air above / below the 60-unit Bayer logo — never clipped */ overflow: hidden; z-index: 3;
+  .logos { -webkit-transform: translateZ(0); position: absolute; left: 0; right: 0; top: calc(900 * var(--hu) + 27 * var(--u)); height: calc(66 * var(--u));   /* 3 units of air above / below the 60-unit Bayer logo — never clipped */ overflow: hidden; z-index: 3;
            mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); }
-  .logos-track { display: flex; width: max-content; height: 100%; animation: marquee 45s linear infinite; }
+  /* own GPU layer for the moving strip: Safari otherwise stops painting the part of a wide, transform-animated strip
+     that has moved left (logos vanished left of the centre on Mac Safari) */
+  .logos-track { display: flex; width: max-content; height: 100%; animation: marquee 45s linear infinite;
+                 will-change: transform; transform: translate3d(0, 0, 0); backface-visibility: hidden; -webkit-backface-visibility: hidden; }
   .logos:hover .logos-track { animation-play-state: paused; }
   .logo-set { display: flex; align-items: center; gap: calc(80 * var(--u)); padding-right: calc(80 * var(--u)); }
   .logo-set > * { flex: none; position: relative; }
@@ -138,7 +142,7 @@
   .lg:hover .v.g { opacity: 0; }
   .lg-part { position: absolute; display: block; }
   .lg-part img { width: 100%; height: 100%; }
-  @keyframes marquee { to { transform: translateX(-50%); } }
+  @keyframes marquee { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(-50%, 0, 0); } }
 
   /* ============ solutions (blue pixel field is drawn by WebGL behind this) ============ */
   /* 14 rows of 120: two solid rows under the text before the stepped bottom edge starts (it breaks away into the cloud) */
