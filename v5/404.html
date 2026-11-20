@@ -3,14 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="only light">
+<meta name="color-scheme" content="light dark">
 <title>404 — ic-it</title>
 <meta name="robots" content="noindex">
 <link rel="icon" href="/assets/favicon.ico" sizes="any">
 <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
 <link rel="manifest" href="/assets/site.webmanifest">
-<meta name="theme-color" content="#F4F5F0">
+<meta name="theme-color" content="#F4F5F0" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111213" media="(prefers-color-scheme: dark)">
 <style>
 /* cyrillic */
 @font-face {
@@ -67,20 +68,20 @@
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 </style>
-<link rel="stylesheet" href="/assets/common.css?v=e2363422">
+<link rel="stylesheet" href="/assets/common.css?v=ba9cbacb">
 <style>
   /* page not found — German first (as the legal pages), English below; links from the site root */
   body { min-height: 100svh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px;
          padding: 24px 16px; text-align: center; }
   .nf-code { margin: 0; font-size: clamp(96px, 18vw, 220px); line-height: 1; letter-spacing: -0.04em; color: var(--orange); }
   .nf-text { margin: 0; font-size: 15px; line-height: 1.6; }
-  .nf-home { display: inline-block; padding: 18px 32px; border-radius: 6px; background: #000; color: #fff; text-decoration: none;
+  .nf-home { display: inline-block; padding: 18px 32px; border-radius: 6px; background: var(--btn-bg); color: var(--btn-ink); text-decoration: none;
              font: 500 15px / 1.184 var(--mono); text-transform: uppercase; }
-  .nf-home:hover { background: var(--blue); }
+  .nf-home:hover { background: var(--blue); color: #fff; }
 </style>
 </head>
 <body>
-  <a href="/" aria-label="ic-it — Startseite"><img src="/assets/logo-full.svg" alt="intercomputer" width="200" height="32"></a>
+  <a href="/" aria-label="ic-it — Startseite"><picture><source srcset="/assets/logo-full-dark.svg" media="(prefers-color-scheme: dark)"><img src="/assets/logo-full.svg" alt="intercomputer" width="200" height="32"></picture></a>
   <h1 class="nf-code display">404</h1>
   <p class="nf-text">Diese Seite gibt es nicht.<br>This page doesn’t exist.</p>
   <a class="nf-home" href="/">Zur Startseite · Home</a>
