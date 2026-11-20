@@ -194,6 +194,9 @@
             font: 500 max(12px, calc(14 * var(--u))) / 1.184 var(--mono); color: rgba(var(--ink-rgb),.4); text-transform: uppercase; transition: color .2s ease; }
   .to-top img { width: max(10px, calc(12 * var(--u))); height: auto; }
   .to-top:hover { color: var(--ink); }
+  /* the arrows dim and light up together with their label (the label is 40 % ink, full ink on hover) */
+  .topics-skip img, .to-top img { opacity: .4; transition: opacity .2s ease; }
+  .topics-skip:hover img, .to-top:hover img, .topics-skip:focus-visible img, .to-top:focus-visible img { opacity: 1; }
   .to-top:focus-visible { outline: 2px solid var(--blue); outline-offset: 4px; }
   @media (prefers-color-scheme: dark) { .to-top img { filter: invert(1); } }
   @media (max-width: 899px), (max-width: 1199px) and (orientation: portrait) { .to-top { right: auto; left: 50%; transform: translateX(-50%); } }
