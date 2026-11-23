@@ -113,7 +113,7 @@
   .hero-text {
     /* anchored by its bottom edge: always 52 hero-units above the end of the first screen, however many lines it has */
     position: absolute; left: 50%; top: calc(848 * var(--hu)); transform: translate(-50%, -100%); width: calc(670 * var(--hu)); min-width: 520px;
-    margin: 0; text-align: center; font-size: max(12px, calc(14 * var(--hu))); line-height: 1.65; z-index: 3;
+    margin: 0; text-align: center; font-size: max(12px, calc(14 * var(--hu))); line-height: 1.65; z-index: 3; white-space: pre-line;   /* a line break in the text starts a new line (DE: the lead line) */
   }
 
   /* tags around the cube (self-drawn: one 1px SVG path per tag = leader + underline; positions from JS) */
@@ -400,7 +400,7 @@
 <section class="cta-sec" id="ctaSec">
   <div class="cta" id="cta">
     <div class="cta-text">
-      <h2 class="display" data-fit style="--fs:80"><span id="ctaTitle" data-i18n="cta.title">IT. Built Deep. Made Simple.</span></h2>
+      <h2 class="display" data-fit="1100" style="--fs:80"><span id="ctaTitle" data-i18n="cta.title">IT. Built Deep. Made Simple.</span></h2>
       <p data-i18n="cta.text">Let’s discuss your next project.</p>
     </div>
     <form onsubmit="event.preventDefault(); this.querySelector('button').textContent = window.icI18n ? icI18n.t('cta.thanks') : 'Thank you'">
@@ -658,7 +658,7 @@
 
 <canvas id="gl"></canvas>
 
-<script src="assets/i18n.js?v=85b511a5"></script>
+<script src="assets/i18n.js?v=b1b148a7"></script>
 
 <!-- ============ hero tags around the cube ============ -->
 <script>
@@ -839,14 +839,15 @@
   addEventListener('resize', () => { if (innerWidth === lastW) return; lastW = innerWidth; hideFaceTag(); tags.filter(t => !t.leaving).forEach((t, i) => { t.expires = performance.now() + i * 150; }); });
   // language switched → the current tags are swapped for words in the new language in a quick cascade
   addEventListener('ic-lang', () => { const now = performance.now(); lastWord = ''; tags.filter(t => !t.leaving).forEach((t, i) => { t.expires = now + i * 200; }); nextSpawn = now; });
-  // one-line headlines (hero, call to action): if a translation is wider than the 1360 px content width, scale it down.
+  // one-line headlines (hero, call to action): if a translation is wider than its width (data-fit="<design px>", default
+  // the 1360 px content width; the call to action keeps 1100 so its cubes stay clear of a long headline), scale it down.
   // Phones wrap normally.
   function fitLines() {
     document.querySelectorAll('[data-fit]').forEach(el => {
       el.style.setProperty('--fit', 1);
       if (icPhone()) return;
       const r = document.createRange(); r.selectNodeContents(el);
-      const w = r.getBoundingClientRect().width, max = innerWidth * 1360 / 1440;
+      const w = r.getBoundingClientRect().width, max = innerWidth * (+el.dataset.fit || 1360) / 1440;
       if (w > max) el.style.setProperty('--fit', (max / w * 0.99).toFixed(4));
     });
   }
