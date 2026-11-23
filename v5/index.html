@@ -128,11 +128,10 @@
   /* client logos — endless marquee */
   .logos { -webkit-transform: translateZ(0); position: absolute; left: 0; right: 0; top: calc(900 * var(--hu) + 27 * var(--u)); height: calc(66 * var(--u));   /* 3 units of air above / below the 60-unit Bayer logo — never clipped */ overflow: hidden; z-index: 3;
            mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); }
-  /* own GPU layer for the moving strip: Safari otherwise stops painting the part of a wide, transform-animated strip
-     that has moved left (logos vanished left of the centre on Mac Safari) */
-  .logos-track { display: flex; width: max-content; height: 100%; animation: marquee 45s linear infinite;
-                 will-change: transform; transform: translate3d(0, 0, 0); backface-visibility: hidden; -webkit-backface-visibility: hidden; }
-  .logos:hover .logos-track { animation-play-state: paused; }
+  /* the marquee moves every logo on its own (script below the hero): a logo that has left on the left comes back on the
+     right. No wide moving strip — Safari (iPhone / Mac) stopped painting the part of such a strip that had moved left */
+  .logos-track { display: flex; width: max-content; height: 100%; }
+  .logo-set > .lg { will-change: transform; }
   .logo-set { display: flex; align-items: center; gap: calc(80 * var(--u)); padding-right: calc(80 * var(--u)); }
   .logo-set > * { flex: none; position: relative; }
   .logo-set img { width: 100%; height: 100%; max-width: none; }
@@ -143,7 +142,6 @@
   .lg:hover .v.g { opacity: 0; }
   .lg-part { position: absolute; display: block; }
   .lg-part img { width: 100%; height: 100%; }
-  @keyframes marquee { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(-50%, 0, 0); } }
 
   /* ============ solutions (blue pixel field is drawn by WebGL behind this) ============ */
   /* 14 rows of 120: two solid rows under the text before the stepped bottom edge starts (it breaks away into the cloud) */
@@ -387,7 +385,7 @@
   // the next topic mark from y in direction dir (±1), or undefined when the cloud ends there
   const nextMark = (T, y, dir) => dir > 0 ? T.find(t => t > y + 2) : [...T].reverse().find(t => t < y - 2);
   let lockUntil = 0;
-  const go = top => { scrollTo({ top, behavior: 'instant' }); lockUntil = performance.now() + LOCK; };
+  const go = top => { scrollTo({ top, behavior: 'instant' }); lockUntil = performance.now() + LOCK; if (typeof syncTouchAction === 'function') syncTouchAction(); };
   // one step from y; true if the cloud took the gesture
   function step(dir) {
     const T = marks(), y = scrollY;
@@ -416,9 +414,21 @@
     else if (dir < 0 && y > last && y + d <= last + 2) { e.preventDefault(); go(last); taken = true; }
   }, { passive: false });
 
-  // ---- touch: only while the page stands IN the cloud. The page doesn't follow the finger (no native scroll, so no
-  // momentum to fight); on release the swipe makes one step. Up from the first / down from the last topic it scrolls
-  // natively. Outside the cloud nothing is touched: native scrolling, and the snap points stop a fling at the cloud.
+  // ---- touch: while the page stands IN the cloud, touch-action: none (CSS) switches the browser's own scrolling off —
+  // the page doesn't follow the finger, there is no momentum, and no scroll-blocking touch listener is needed (on iOS
+  // such a listener made the WebGL picture freeze during scrolling). On release a swipe makes ONE step; up from the first /
+  // down from the last topic it glides out of the cloud. Outside the cloud the browser scrolls as usual, and the snap
+  // points stop a fling at the cloud's edge.
+  let taRaf = 0;
+  const syncTouchAction = () => { taRaf = 0; const v = inCloud(marks(), scrollY) ? 'none' : ''; if (document.body.style.touchAction !== v) document.body.style.touchAction = v; };
+  addEventListener('scroll', () => { if (!taRaf) taRaf = requestAnimationFrame(syncTouchAction); }, { passive: true });
+  syncTouchAction();
+  const leave = top => {                                     // out of the cloud: the snap points must not catch this glide
+    const root = document.documentElement; root.style.scrollSnapType = 'none';
+    const back = () => { root.style.scrollSnapType = ''; removeEventListener('touchstart', back); };
+    addEventListener('touchstart', back, { passive: true });
+    scrollTo({ top, behavior: 'smooth' });
+  };
   let t0 = null, enterT = 0;
   // a swipe that starts BEFORE the cloud always ends on its first topic (from below: on its last one), even when the
   // finger itself drags the page deep into it; meanwhile the cloud keeps showing that topic (window.__icEnter, read by
@@ -436,25 +446,17 @@
     clearTimeout(enterT);
     const T = marks(), y = scrollY;
     window.__icEnter = y < T[0] - 2 ? 'top' : y > T[T.length - 1] + 2 ? 'bottom' : null;
-    t0 = e.touches.length === 1 && inCloud(T, y) ? { y: e.touches[0].clientY, sy: y, dir: 0, to: undefined } : null;
+    t0 = e.touches.length === 1 && inCloud(T, y) ? { y: e.touches[0].clientY, sy: y } : null;
   }, { passive: true });
-  addEventListener('touchmove', e => {
-    if (!t0) return;
-    const dy = t0.y - e.touches[0].clientY;                   // > 0: the page would scroll down
-    // decided on the very first move — iOS starts its own scroll right away and won't let it be cancelled later
-    if (!t0.dir) {
-      if (!dy) { if (e.cancelable) e.preventDefault(); return; }
-      t0.dir = Math.sign(dy);
-      t0.to = performance.now() < lockUntil ? null : nextMark(marks(), t0.sy, t0.dir);   // null: a step is still settling — hold
-    }
-    if (t0.to !== undefined && e.cancelable) e.preventDefault();
-  }, { passive: false });
   addEventListener('touchend', e => {
     if (window.__icEnter) enterLater();
     if (!t0) return;
-    const dy = t0.y - (e.changedTouches[0] ? e.changedTouches[0].clientY : t0.y);
-    if (t0.to != null && Math.abs(dy) >= MIN_SWIPE) go(t0.to);
+    const dy = t0.y - (e.changedTouches[0] ? e.changedTouches[0].clientY : t0.y), sy = t0.sy;   // dy > 0: towards the next topic
     t0 = null;
+    if (Math.abs(dy) < MIN_SWIPE || performance.now() < lockUntil) return;   // a tap, or the previous step still settling
+    const T = marks(), dir = Math.sign(dy), to = nextMark(T, sy, dir);
+    if (to !== undefined) go(to);
+    else leave(dir > 0 ? T[T.length - 1] + innerHeight : Math.max(0, T[0] - innerHeight));
   }, { passive: true });
   addEventListener('touchcancel', () => { t0 = null; }, { passive: true });
 
@@ -927,9 +929,29 @@
   addEventListener('resize', fitLines);
   addEventListener('ic-lang', fitLines);
   document.fonts && document.fonts.ready.then(fitLines);
-  // clone the logo set for the seamless marquee
-  const set = document.getElementById('logoSet');
-  set.parentNode.appendChild(set.cloneNode(true)).setAttribute('aria-hidden', 'true');
+  // the endless marquee: each logo moves on its own and wraps from the left edge to the right end of the row
+  // (one full round of the row in MARQUEE_S seconds, paused under the cursor, idle while off screen)
+  const MARQUEE_S = 45, box = document.querySelector('.logos'), set = document.getElementById('logoSet');
+  const items = [...set.children];
+  let L = 0, base = [], wid = [], off = 0, last = 0, hover = false, visible = true;
+  const measure = () => {
+    items.forEach(el => { el.style.transform = ''; });
+    base = items.map(el => el.offsetLeft); wid = items.map(el => el.offsetWidth);
+    L = set.offsetWidth;                                            // the row incl. its trailing gap = one period
+    // the row must be wider than the strip, else a gap would show: then the gaps between logos grow
+    const need = box.clientWidth + Math.max(...wid) + 1;
+    if (L < need) { const extra = (need - L) / items.length; base = base.map((b, i) => b + extra * i); L = need; }
+  };
+  const place = () => items.forEach((el, i) => { const x = ((base[i] - off) % L + L) % L; const shown = x > L - wid[i] ? x - L : x;   // just past the left edge → wraps to the right end
+    el.style.transform = `translate3d(${(shown - el.offsetLeft).toFixed(2)}px,0,0)`; });
+  const tick = now => { const dt = last ? Math.min(0.1, (now - last) / 1000) : 0; last = now;
+    if (!hover && visible && L) { off = (off + dt * L / MARQUEE_S) % L; place(); }
+    requestAnimationFrame(tick); };
+  box.addEventListener('mouseenter', () => { hover = true; }); box.addEventListener('mouseleave', () => { hover = false; });
+  new IntersectionObserver(es => { visible = es[0].isIntersecting; }).observe(box);
+  measure(); place(); requestAnimationFrame(tick);
+  addEventListener('resize', () => { measure(); place(); });
+  document.fonts && document.fonts.ready.then(() => { measure(); place(); });
 })();
 </script>
 
