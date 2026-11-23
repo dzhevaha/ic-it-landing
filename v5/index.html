@@ -380,8 +380,12 @@
   const inCloud = (T, y) => y >= T[0] - 2 && y <= T[T.length - 1] + 2;
   // the next topic mark from y in direction dir (±1), or undefined when the cloud ends there
   const nextMark = (T, y, dir) => dir > 0 ? T.find(t => t > y + 2) : [...T].reverse().find(t => t < y - 2);
-  let lockUntil = 0;
-  const go = (top, smooth) => { scrollTo({ top, behavior: smooth ? 'smooth' : 'instant' }); lockUntil = performance.now() + LOCK; };
+  let lockUntil = 0, fz = 0;
+  // iOS (Safari and every iOS browser) does NOT stop a fling's momentum on a programmatic scroll — the page would keep
+  // gliding on and be pulled back again (flicker, topics jumping back and forth). Switching scrolling off for a moment
+  // kills the momentum there; Android stops it on scrollTo anyway.
+  const stopMomentum = () => { const r = document.documentElement; r.style.overflow = 'hidden'; clearTimeout(fz); fz = setTimeout(() => { r.style.overflow = ''; }, 140); };
+  const go = (top, smooth, touch) => { if (touch) stopMomentum(); scrollTo({ top, behavior: smooth ? 'smooth' : 'instant' }); lockUntil = performance.now() + LOCK; };
   // one step from y; true if the cloud took the gesture
   function step(dir) {
     const T = marks(), y = scrollY;
@@ -420,7 +424,9 @@
   addEventListener('touchmove', e => {
     if (!t0) return;
     const dy = t0.y - e.touches[0].clientY;                   // > 0: the page would scroll down
-    if (!t0.dir && Math.abs(dy) > 8) {
+    // decided on the very FIRST move: iOS starts its own scroll right away and then no longer lets it be cancelled
+    if (!t0.dir && !dy) { if (inCloud(marks(), t0.sy) && e.cancelable) e.preventDefault(); return; }
+    if (!t0.dir) {
       t0.dir = Math.sign(dy);
       const T = marks();
       if (inCloud(T, t0.sy) && performance.now() >= lockUntil) t0.to = nextMark(T, t0.sy, t0.dir);
@@ -431,7 +437,7 @@
   addEventListener('touchend', e => {
     if (!t0) return;
     const dy = t0.y - (e.changedTouches[0] ? e.changedTouches[0].clientY : t0.y);
-    if (t0.to != null && Math.abs(dy) >= MIN_SWIPE) go(t0.to, false);
+    if (t0.to != null && Math.abs(dy) >= MIN_SWIPE) go(t0.to, false, true);
     wall = t0.wall; wallAbove = t0.above; t0 = null;
   }, { passive: true });
   // a drag / fling from outside: the cloud's edge is a wall for that whole gesture, momentum included
@@ -440,7 +446,21 @@
   addEventListener('scroll', () => {
     if (wall === undefined && !(t0 && t0.wall !== undefined)) return;
     const w = wall !== undefined ? wall : t0.wall, above = wall !== undefined ? wallAbove : t0.above;
-    if (above ? scrollY > w + 2 : scrollY < w - 2) go(w, false);   // the wall holds until the next touch
+    if (above ? scrollY > w + 2 : scrollY < w - 2) go(w, false, true);   // the wall holds until the next touch
+  }, { passive: true });
+
+  // ---- safety net: whatever moved the page, it never rests BETWEEN two topics inside the cloud (that made the shown
+  // topic flip back and forth) — once scrolling has settled, it goes to the nearest topic
+  let settle = 0;
+  addEventListener('scroll', () => {
+    clearTimeout(settle);
+    settle = setTimeout(() => {
+      if (t0) return;                                        // a finger is still on the screen
+      const T = marks(), y = scrollY;
+      if (!inCloud(T, y)) return;
+      const near = T.reduce((b, t) => Math.abs(t - y) < Math.abs(b - y) ? t : b, T[0]);
+      if (Math.abs(near - y) > 2) go(near, false, matchMedia('(pointer: coarse)').matches);
+    }, 150);
   }, { passive: true });
 
   // ---- keys
