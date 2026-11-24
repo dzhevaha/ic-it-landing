@@ -379,7 +379,7 @@
    after a strong fling. Up from the first topic and down from the last one the page scrolls freely. The steps inside are
    instant (the stage is sticky, nothing moves on screen; the topic change plays on its own clock). */
 (() => {
-  const GAP = 350, LOCK = 350, HOLD = 700, MIN_SWIPE = 24;
+  const GAP = 350, LOCK = 350, MIN_SWIPE = 24;
   const marks = () => [...document.querySelectorAll('.topics-snap')].map(e => Math.round(e.getBoundingClientRect().top + scrollY));
   const inCloud = (T, y) => y >= T[0] - 2 && y <= T[T.length - 1] + 2;
   // the next topic mark from y in direction dir (±1), or undefined when the cloud ends there
@@ -396,26 +396,46 @@
   }
 
   // ---- wheel / trackpad
-  // A gesture ends after GAP ms without wheel events (Safari pauses between the finger phase and its momentum, so this
-  // can't be shorter). Inside one stream a NEW push only counts after HOLD ms since the step and when it is 4× stronger
-  // than the fading tail (ema) — macOS momentum is jittery (coalesced events, 2–3× spikes) but never that much.
-  let lastT = 0, ema = 0, taken = false, stepT = 0;
+  // A gesture = one stream of wheel events (the trackpad's momentum included); it ends after GAP ms of silence (Safari
+  // pauses between the finger phase and its momentum, so this can't be shorter). Only the first event of a gesture can
+  // make a step; the rest of the stream is swallowed.
+  // Chrome LATCHES a stream: if its first event wasn't cancelled, none of the following ones can be — the browser scrolls
+  // them itself, right through the cloud. So every stream that starts near the cloud (ZONE_UP screens above it …
+  // ZONE_DOWN below it) is taken over from its first event, and the page is scrolled by the script — it can then stop
+  // exactly at the cloud's edge. A stream from further away scrolls natively; if it carries the page into the cloud
+  // anyway, the cloud keeps showing its first / last topic and the page is set onto it once the stream is over.
+  const ZONE_UP = 2, ZONE_DOWN = 1.5;
+  let lastT = 0, taken = false, owned = false, smoothTo = null, smoothUntil = 0;
+  const scrollOwn = (y, d, now) => {                           // the script scrolls instead of the browser (mouse notches glide)
+    const max = document.documentElement.scrollHeight - innerHeight;
+    if (Math.abs(d) >= 50) { const from = now < smoothUntil && smoothTo !== null ? smoothTo : y; smoothTo = Math.max(0, Math.min(max, from + d)); smoothUntil = now + 260; scrollTo({ top: smoothTo, behavior: 'smooth' }); }
+    else { smoothTo = null; scrollTo({ top: Math.max(0, Math.min(max, y + d)), behavior: 'instant' }); }
+  };
   addEventListener('wheel', e => {
     if (e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
     const d = e.deltaY * (e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? innerHeight : 1);
     if (!d) return;
-    const now = performance.now(), a = Math.abs(d), gap = now - lastT;
-    const fresh = gap > GAP || (taken && now - stepT > HOLD && a > Math.max(25, ema * 4));
-    ema = gap > GAP ? a : ema * 0.7 + a * 0.3;
+    const now = performance.now(), T = marks(), first = T[0], last = T[T.length - 1], dir = Math.sign(d);
+    const y = now < smoothUntil && smoothTo !== null ? smoothTo : scrollY;   // where a running glide is heading
+    if (now - lastT > GAP) {                                   // a new gesture
+      taken = false;
+      owned = y >= first - innerHeight * ZONE_UP && y <= last + innerHeight * ZONE_DOWN;
+      window.__icEnter = owned ? null : y < first ? 'top' : 'bottom';
+    }
     lastT = now;
-    if (fresh) taken = false;
-    if (taken) { e.preventDefault(); return; }               // the rest of a gesture that already made its step
-    if (now < lockUntil) { const T = marks(); if (inCloud(T, scrollY)) { e.preventDefault(); return; } }
-    const T = marks(), y = scrollY, dir = Math.sign(d), first = T[0], last = T[T.length - 1];
-    if (inCloud(T, y)) { if (step(dir)) { taken = true; stepT = now; e.preventDefault(); } return; }
-    // entering the cloud: stop at its edge
-    if (dir > 0 && y < first && y + d >= first - 2) { e.preventDefault(); go(first); taken = true; stepT = now; }
-    else if (dir < 0 && y > last && y + d <= last + 2) { e.preventDefault(); go(last); taken = true; stepT = now; }
+    if (!owned) return;                                        // far from the cloud: the browser scrolls
+    if (!e.cancelable) return;
+    e.preventDefault();
+    if (taken) return;                                         // the rest of a gesture that already made its step
+    if (inCloud(T, y)) {
+      if (now < lockUntil) return;
+      if (step(dir)) { taken = true; smoothTo = null; return; }
+      scrollOwn(y, d, now); return;                            // up from the first / down from the last topic: out
+    }
+    // near the cloud: scroll, but stop at its edge
+    if (dir > 0 && y < first && y + d >= first - 2) { smoothTo = null; go(first); taken = true; return; }
+    if (dir < 0 && y > last && y + d <= last + 2) { smoothTo = null; go(last); taken = true; return; }
+    scrollOwn(y, d, now);
   }, { passive: false });
 
   // ---- touch: while the page stands IN the cloud, touch-action: none (CSS) switches the browser's own scrolling off —
