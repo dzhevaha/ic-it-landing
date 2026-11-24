@@ -395,16 +395,18 @@
   }
 
   // ---- wheel / trackpad — three plain rules, the same for a mouse wheel, a trackpad and a Magic Mouse:
-  // 1) a gesture is a stream of wheel events (momentum included); a NEW gesture only after QUIET ms without any wheel event;
-  // 2) a gesture makes at most ONE step (on its first event of ≥ PUSH px), and after a step nothing steps for COOLDOWN ms;
+  // 1) a gesture is a stream of wheel events (momentum included); a NEW gesture starts after QUIET ms without any wheel
+  //    event, or at once when the direction turns (inertia never turns back — so scrolling back is never swallowed);
+  // 2) a gesture makes at most ONE step (on its first event of ≥ PUSH px); in the same direction the next step comes no
+  //    sooner than COOLDOWN ms after it (that is still the old swipe's inertia);
   // 3) after the step the page is HELD on that topic while the wheel keeps going — whatever the browser still scrolls by
   //    itself (events it doesn't let us cancel) is put back.
   // Chrome LATCHES a stream: if its first event wasn't cancelled, none of the following ones can be — so every stream that
   // starts near the cloud (ZONE_UP screens above it … ZONE_DOWN below it) is taken over from its first event and the page
   // is scrolled by the script, which stops exactly at the cloud's edge. A stream from further away scrolls natively; if it
   // carries the page into the cloud anyway, the cloud keeps showing its first / last topic and the page is set onto it.
-  const QUIET = 600, COOLDOWN = 1400, PUSH = 8, HOLD = 400, ZONE_UP = 2, ZONE_DOWN = 1.5;
-  let lastT = 0, taken = false, owned = false, smoothTo = null, smoothUntil = 0, lastStep = 0, gLo = -Infinity, gHi = Infinity;
+  const QUIET = 350, COOLDOWN = 900, PUSH = 8, HOLD = 400, ZONE_UP = 2, ZONE_DOWN = 1.5;
+  let lastT = 0, lastDir = 0, stepDir = 0, taken = false, owned = false, smoothTo = null, smoothUntil = 0, lastStep = 0, gLo = -Infinity, gHi = Infinity;
   const free = () => { gLo = -Infinity; gHi = Infinity; };
   addEventListener('scroll', () => {                           // rule 3
     if (gLo === -Infinity && gHi === Infinity) return;
@@ -424,28 +426,28 @@
     if (!d) return;
     const now = performance.now(), T = marks(), first = T[0], last = T[T.length - 1], dir = Math.sign(d);
     const y = now < smoothUntil && smoothTo !== null ? smoothTo : scrollY;   // where a running glide is heading
-    if (now - lastT > QUIET) {                                 // rule 1: a new gesture
+    if (now - lastT > QUIET || dir !== lastDir) {              // rule 1: a new gesture
       taken = false;
       owned = y >= first - innerHeight * ZONE_UP && y <= last + innerHeight * ZONE_DOWN;
       window.__icEnter = owned ? null : y < first ? 'top' : 'bottom';
       if (inCloud(T, y)) { const lo = nextMark(T, y, -1), hi = nextMark(T, y, 1); gLo = lo === undefined ? -Infinity : lo; gHi = hi === undefined ? Infinity : hi; }
       else free();
     }
-    lastT = now;
+    lastT = now; lastDir = dir;
     if (!owned) return;                                        // far from the cloud: the browser scrolls
     if (!e.cancelable) return;                                 // (rule 3 still holds the page)
     e.preventDefault();
     if (taken) return;                                         // the rest of a gesture that already made its step
     if (inCloud(T, y)) {
-      if (now - lastStep < COOLDOWN) { taken = true; return; }  // rule 2: still the previous gesture (its inertia) — the whole stream is spent
+      if (dir === stepDir && now - lastStep < COOLDOWN) return; // rule 2: still the previous swipe's inertia
       if (Math.abs(d) < PUSH) return;
       const to = nextMark(T, y, dir);
-      if (to !== undefined) { go(to); taken = true; lastStep = now; smoothTo = null; gLo = gHi = to; return; }
+      if (to !== undefined) { go(to); taken = true; lastStep = now; stepDir = dir; smoothTo = null; gLo = gHi = to; return; }
       free(); scrollOwn(y, d, now); return;                    // up from the first / down from the last topic: out
     }
     // near the cloud: scroll, but stop at its edge
-    if (dir > 0 && y < first && y + d >= first - 2) { smoothTo = null; go(first); taken = true; lastStep = now; gLo = -Infinity; gHi = first; return; }
-    if (dir < 0 && y > last && y + d <= last + 2) { smoothTo = null; go(last); taken = true; lastStep = now; gLo = last; gHi = Infinity; return; }
+    if (dir > 0 && y < first && y + d >= first - 2) { smoothTo = null; go(first); taken = true; lastStep = now; stepDir = dir; gLo = -Infinity; gHi = first; return; }
+    if (dir < 0 && y > last && y + d <= last + 2) { smoothTo = null; go(last); taken = true; lastStep = now; stepDir = dir; gLo = last; gHi = Infinity; return; }
     scrollOwn(y, d, now);
   }, { passive: false });
 
