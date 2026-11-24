@@ -379,7 +379,7 @@
    after a strong fling. Up from the first topic and down from the last one the page scrolls freely. The steps inside are
    instant (the stage is sticky, nothing moves on screen; the topic change plays on its own clock). */
 (() => {
-  const GAP = 350, LOCK = 350, MIN_SWIPE = 24;
+  const GAP = 350, LOCK = 350, MIN_SWIPE = 24, STEP_EVERY = 800, PUSH = 8, FIRM = 15;
   const marks = () => [...document.querySelectorAll('.topics-snap')].map(e => Math.round(e.getBoundingClientRect().top + scrollY));
   const inCloud = (T, y) => y >= T[0] - 2 && y <= T[T.length - 1] + 2;
   // the next topic mark from y in direction dir (±1), or undefined when the cloud ends there
@@ -397,15 +397,17 @@
 
   // ---- wheel / trackpad
   // A gesture = one stream of wheel events (the trackpad's momentum included); it ends after GAP ms of silence (Safari
-  // pauses between the finger phase and its momentum, so this can't be shorter). Only the first event of a gesture can
-  // make a step; the rest of the stream is swallowed.
+  // pauses between the finger phase and its momentum, so this can't be shorter). A stream makes at most ONE step, and
+  // only on a real push: a firm event (≥ FIRM px — a mouse notch, a brisk swipe) or an accelerating swipe (≥ PUSH px and
+  // at least twice its first event). The slow end of a strong macOS momentum comes as 1–3 px events after long pauses (zero deltas aren't sent),
+  // which looks like a new stream — but it never accelerates, so it is only swallowed. Steps are ≥ STEP_EVERY ms apart.
   // Chrome LATCHES a stream: if its first event wasn't cancelled, none of the following ones can be — the browser scrolls
   // them itself, right through the cloud. So every stream that starts near the cloud (ZONE_UP screens above it …
   // ZONE_DOWN below it) is taken over from its first event, and the page is scrolled by the script — it can then stop
   // exactly at the cloud's edge. A stream from further away scrolls natively; if it carries the page into the cloud
   // anyway, the cloud keeps showing its first / last topic and the page is set onto it once the stream is over.
   const ZONE_UP = 2, ZONE_DOWN = 1.5;
-  let lastT = 0, taken = false, owned = false, smoothTo = null, smoothUntil = 0;
+  let lastT = 0, taken = false, owned = false, smoothTo = null, smoothUntil = 0, first0 = 0, lastStep = 0;
   const scrollOwn = (y, d, now) => {                           // the script scrolls instead of the browser (mouse notches glide)
     const max = document.documentElement.scrollHeight - innerHeight;
     if (Math.abs(d) >= 50) { const from = now < smoothUntil && smoothTo !== null ? smoothTo : y; smoothTo = Math.max(0, Math.min(max, from + d)); smoothUntil = now + 260; scrollTo({ top: smoothTo, behavior: 'smooth' }); }
@@ -418,7 +420,7 @@
     const now = performance.now(), T = marks(), first = T[0], last = T[T.length - 1], dir = Math.sign(d);
     const y = now < smoothUntil && smoothTo !== null ? smoothTo : scrollY;   // where a running glide is heading
     if (now - lastT > GAP) {                                   // a new gesture
-      taken = false;
+      taken = false; first0 = Math.abs(d);
       owned = y >= first - innerHeight * ZONE_UP && y <= last + innerHeight * ZONE_DOWN;
       window.__icEnter = owned ? null : y < first ? 'top' : 'bottom';
     }
@@ -428,13 +430,14 @@
     e.preventDefault();
     if (taken) return;                                         // the rest of a gesture that already made its step
     if (inCloud(T, y)) {
-      if (now < lockUntil) return;
-      if (step(dir)) { taken = true; smoothTo = null; return; }
+      const a = Math.abs(d), push = a >= FIRM || (a >= PUSH && a >= first0 * 2);
+      if (now < lockUntil || now - lastStep < STEP_EVERY || !push) return;   // a fading tail, or too soon: swallowed
+      if (step(dir)) { taken = true; lastStep = now; smoothTo = null; return; }
       scrollOwn(y, d, now); return;                            // up from the first / down from the last topic: out
     }
     // near the cloud: scroll, but stop at its edge
-    if (dir > 0 && y < first && y + d >= first - 2) { smoothTo = null; go(first); taken = true; return; }
-    if (dir < 0 && y > last && y + d <= last + 2) { smoothTo = null; go(last); taken = true; return; }
+    if (dir > 0 && y < first && y + d >= first - 2) { smoothTo = null; go(first); taken = true; lastStep = now; return; }
+    if (dir < 0 && y > last && y + d <= last + 2) { smoothTo = null; go(last); taken = true; lastStep = now; return; }
     scrollOwn(y, d, now);
   }, { passive: false });
 
