@@ -370,8 +370,8 @@
 /* The topic cloud: ONE gesture = ONE topic, whatever the device and however strong the gesture.
    Inside the cloud the page does not scroll by itself — every gesture moves it exactly to the next / previous topic mark:
    · wheel / trackpad: a gesture is a burst of wheel events (the trackpad's inertia included) — it ends after a pause of
-     GAP ms, or when a clearly stronger push starts a new one. The first event of a gesture makes the step, the rest of
-     the burst is swallowed.
+     GAP ms, or when a much stronger push starts a new one (see below). The first event of a gesture makes the step, the
+     rest of the burst is swallowed.
    · touch: the swipe direction is read on the first move; if there is a topic that way, the page doesn't follow the
      finger, and on release (a swipe ≥ MIN_SWIPE px) it steps once. No momentum, so no flying over topics.
    · keys: ↓ / ↑ / PageDown / PageUp / Space.
@@ -379,7 +379,7 @@
    after a strong fling. Up from the first topic and down from the last one the page scrolls freely. The steps inside are
    instant (the stage is sticky, nothing moves on screen; the topic change plays on its own clock). */
 (() => {
-  const GAP = 180, LOCK = 350, MIN_SWIPE = 24;
+  const GAP = 350, LOCK = 350, HOLD = 700, MIN_SWIPE = 24;
   const marks = () => [...document.querySelectorAll('.topics-snap')].map(e => Math.round(e.getBoundingClientRect().top + scrollY));
   const inCloud = (T, y) => y >= T[0] - 2 && y <= T[T.length - 1] + 2;
   // the next topic mark from y in direction dir (±1), or undefined when the cloud ends there
@@ -396,22 +396,26 @@
   }
 
   // ---- wheel / trackpad
-  let lastT = 0, lastAbs = 0, taken = false;
+  // A gesture ends after GAP ms without wheel events (Safari pauses between the finger phase and its momentum, so this
+  // can't be shorter). Inside one stream a NEW push only counts after HOLD ms since the step and when it is 4× stronger
+  // than the fading tail (ema) — macOS momentum is jittery (coalesced events, 2–3× spikes) but never that much.
+  let lastT = 0, ema = 0, taken = false, stepT = 0;
   addEventListener('wheel', e => {
     if (e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
     const d = e.deltaY * (e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? innerHeight : 1);
     if (!d) return;
-    const now = performance.now(), a = Math.abs(d);
-    const fresh = now - lastT > GAP || (now > lockUntil && a > Math.max(30, lastAbs * 2.2));
-    lastT = now; lastAbs = a;
+    const now = performance.now(), a = Math.abs(d), gap = now - lastT;
+    const fresh = gap > GAP || (taken && now - stepT > HOLD && a > Math.max(25, ema * 4));
+    ema = gap > GAP ? a : ema * 0.7 + a * 0.3;
+    lastT = now;
     if (fresh) taken = false;
     if (taken) { e.preventDefault(); return; }               // the rest of a gesture that already made its step
     if (now < lockUntil) { const T = marks(); if (inCloud(T, scrollY)) { e.preventDefault(); return; } }
     const T = marks(), y = scrollY, dir = Math.sign(d), first = T[0], last = T[T.length - 1];
-    if (inCloud(T, y)) { if (step(dir)) { taken = true; e.preventDefault(); } return; }
+    if (inCloud(T, y)) { if (step(dir)) { taken = true; stepT = now; e.preventDefault(); } return; }
     // entering the cloud: stop at its edge
-    if (dir > 0 && y < first && y + d >= first - 2) { e.preventDefault(); go(first); taken = true; }
-    else if (dir < 0 && y > last && y + d <= last + 2) { e.preventDefault(); go(last); taken = true; }
+    if (dir > 0 && y < first && y + d >= first - 2) { e.preventDefault(); go(first); taken = true; stepT = now; }
+    else if (dir < 0 && y > last && y + d <= last + 2) { e.preventDefault(); go(last); taken = true; stepT = now; }
   }, { passive: false });
 
   // ---- touch: while the page stands IN the cloud, touch-action: none (CSS) switches the browser's own scrolling off —
